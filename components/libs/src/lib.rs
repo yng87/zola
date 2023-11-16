@@ -28,6 +28,7 @@ pub use rayon;
 pub use regex;
 pub use relative_path;
 pub use reqwest;
+pub use scraper;
 pub use serde_json;
 pub use serde_yaml;
 pub use sha2;

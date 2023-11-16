@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use libs::csv::Reader;
 use libs::reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use libs::reqwest::{blocking::Client, header};
+use libs::serde_json::json;
 use libs::tera::{
     from_value, to_value, Error, Error as TeraError, Function as TeraFn, Map, Result, Value,
 };
@@ -48,6 +49,7 @@ enum OutputFormat {
     Plain,
     Xml,
     Yaml,
+    Html,
 }
 
 impl FromStr for OutputFormat {
@@ -62,6 +64,7 @@ impl FromStr for OutputFormat {
             "xml" => Ok(OutputFormat::Xml),
             "plain" => Ok(OutputFormat::Plain),
             "yaml" | "yml" => Ok(OutputFormat::Yaml),
+            "html" => Ok(OutputFormat::Html),
             format => Err(format!("Unknown output format {}", format).into()),
         }
     }
@@ -77,6 +80,7 @@ impl OutputFormat {
             OutputFormat::Xml => "text/xml",
             OutputFormat::Plain => "text/plain",
             OutputFormat::Yaml => "application/x-yaml",
+            OutputFormat::Html => "text/html",
         })
     }
 }
@@ -393,6 +397,7 @@ impl TeraFn for LoadData {
             OutputFormat::Xml => load_xml(data),
             OutputFormat::Yaml => load_yaml(data),
             OutputFormat::Plain => to_value(data).map_err(|e| e.into()),
+            OutputFormat::Html => load_html(data),
         };
 
         if let Ok(data_result) = &result_value {
@@ -567,6 +572,28 @@ fn load_xml(xml_data: String) -> Result<Value> {
         libs::quickxml_to_serde::xml_string_to_json(xml_data, &Default::default())
             .map_err(|e| format!("{:?}", e))?;
     Ok(xml_content)
+}
+
+fn load_html(html_data: String) -> Result<Value> {
+    let document = libs::scraper::Html::parse_document(&html_data);
+    let title_selector = libs::scraper::Selector::parse("title").unwrap();
+    let title = match document.select(&title_selector).next() {
+        Some(node) => match node.text().next() {
+            Some(text) => text,
+            None => "",
+        },
+        None => "",
+    };
+    let img_selector = libs::scraper::Selector::parse(r#"meta[property="og:image"]"#).unwrap();
+    let img = match document.select(&img_selector).next() {
+        Some(node) => match node.value().attr("content") {
+            Some(text) => text,
+            None => "",
+        },
+        None => "",
+    };
+    let html_content = json!({"title": title,"image":img});
+    Ok(html_content)
 }
 
 #[cfg(test)]
@@ -1352,6 +1379,33 @@ mod tests {
                     ["1", "Gutenberg"],
                     ["2", "Printing"]
                 ],
+            })
+        )
+    }
+
+    #[test]
+    fn can_load_html_literal() {
+        let static_fn = LoadData::new(PathBuf::from("../utils"), None, PathBuf::new());
+        let mut args = HashMap::new();
+        let html_str = r#"
+<head>
+    <title>This is title.</title>
+    <meta property="og:image" content="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Barricade18March1871.jpg/640px-Barricade18March1871.jpg">
+</head>
+<body>
+    <h1><div>Hello World!</div></h1>
+</body>
+"#;
+        args.insert("literal".to_string(), to_value(html_str).unwrap());
+        args.insert("format".to_string(), to_value("html").unwrap());
+
+        let result = static_fn.call(&args.clone()).unwrap();
+
+        assert_eq!(
+            result,
+            json!({
+                "title": "This is title.",
+                "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Barricade18March1871.jpg/640px-Barricade18March1871.jpg"
             })
         )
     }
