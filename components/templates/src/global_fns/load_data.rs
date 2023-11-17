@@ -576,23 +576,24 @@ fn load_xml(xml_data: String) -> Result<Value> {
 
 fn load_html(html_data: String) -> Result<Value> {
     let document = libs::scraper::Html::parse_document(&html_data);
-    let title_selector = libs::scraper::Selector::parse("title").unwrap();
-    let title = match document.select(&title_selector).next() {
-        Some(node) => match node.text().next() {
-            Some(text) => text,
+
+    let properties = ["title", "description", "image", "url", "type", "site_name"];
+    let mut m = Map::new();
+
+    for property in properties {
+        let meta_selector =
+            libs::scraper::Selector::parse(&format!(r#"meta[property="og:{}"]"#, property))
+                .map_err(|e| format!("{:?}", e))?;
+        let meta = match document.select(&meta_selector).next() {
+            Some(node) => match node.value().attr("content") {
+                Some(text) => text,
+                None => "",
+            },
             None => "",
-        },
-        None => "",
-    };
-    let img_selector = libs::scraper::Selector::parse(r#"meta[property="og:image"]"#).unwrap();
-    let img = match document.select(&img_selector).next() {
-        Some(node) => match node.value().attr("content") {
-            Some(text) => text,
-            None => "",
-        },
-        None => "",
-    };
-    let html_content = json!({"title": title,"image":img});
+        };
+        m.insert(property.to_string(), meta.into());
+    }
+    let html_content = m.into();
     Ok(html_content)
 }
 
@@ -1390,7 +1391,10 @@ mod tests {
         let html_str = r#"
 <head>
     <title>This is title.</title>
-    <meta property="og:image" content="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Barricade18March1871.jpg/640px-Barricade18March1871.jpg">
+    <meta property="og:title" content="This is title.">
+    <meta property="og:description" content="This is description.">
+    <meta property="og:site_name" content="This is sitename.">
+    <meta property="og:image" content="https://this_is_image.jpg">
 </head>
 <body>
     <h1><div>Hello World!</div></h1>
@@ -1405,7 +1409,11 @@ mod tests {
             result,
             json!({
                 "title": "This is title.",
-                "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Barricade18March1871.jpg/640px-Barricade18March1871.jpg"
+                "description":"This is description.",
+                "image": "https://this_is_image.jpg",
+                "url": "",
+                "type": "",
+                "site_name": "This is sitename.",
             })
         )
     }
