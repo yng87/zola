@@ -581,15 +581,25 @@ fn load_html(html_data: String) -> Result<Value> {
     let mut m = Map::new();
 
     for property in properties {
-        let meta_selector =
+        let meta_selector_by_property =
             libs::scraper::Selector::parse(&format!(r#"meta[property="og:{}"]"#, property))
                 .map_err(|e| format!("{:?}", e))?;
-        let meta = match document.select(&meta_selector).next() {
+        let meta_selector_by_name =
+            libs::scraper::Selector::parse(&format!(r#"meta[name="og:{}"]"#, property))
+                .map_err(|e| format!("{:?}", e))?;
+
+        let meta = match document.select(&meta_selector_by_property).next() {
             Some(node) => match node.value().attr("content") {
                 Some(text) => text,
                 None => "",
             },
-            None => "",
+            None => match document.select(&meta_selector_by_name).next() {
+                Some(node) => match node.value().attr("content") {
+                    Some(text) => text,
+                    None => "",
+                },
+                None => "",
+            },
         };
         m.insert(property.to_string(), meta.into());
     }
